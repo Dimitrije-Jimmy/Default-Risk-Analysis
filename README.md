@@ -21,6 +21,7 @@ This analysis explores:
 ## Project Structure
 - **`MontgomeryWard_Analysis.qmd`**: The main Quarto notebook containing the EDA, modeling, and results.
 - **`MontgomeryWard_Analysis.html`**: The rendered HTML report ("PDF-like" but more interactive) generated from the `.qmd` file.
+- **`task_students_2024.pdf`**: The instructions for the Montgomery Ward Challenge.
 - **`cs-data.csv`**: The dataset with 150,000 client records and 11 attributes.
 - **`README.md`**: You're reading it right now!
 
