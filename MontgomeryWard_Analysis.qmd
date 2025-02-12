@@ -1,0 +1,671 @@
+---
+title: "Exploratory Data Analysis and Predictive Modeling for Default Risk Factors"
+format:
+  html:
+    code-fold: true
+    code-tools: true
+    theme: flatly
+    toc: true
+    toc-depth: 2
+    embed-resources: true
+jupyter: python3
+execute:
+  echo: true
+  output: true
+  warnings: false
+  message: false
+---
+
+
+## Introduction
+
+As a prominent online retail lender, our company is currently facing an alarming increase in client default rates over the past year. This analysis aims to identify the most significant factors contributing to the likelihood of default, represented by the target variable `DlqIn2Years`. Understanding these factors is crucial for creating a strategic response to mitigate default risk and optimize customer management practices.
+ 
+In this report, we will explore the dataset through a combination of statistical methods and machine learning models, prioritizing **transparency** to provide shareholders with clear, actionable insights. Our goal is not only to detect patterns but also to make the models and their findings interpretable and understandable by all stakeholders, ensuring that any decisions based on these findings are explainable and justifiable.
+
+## Data Overview
+
+The dataset includes 150,000 customer records with the following features:
+
+- **DlqIn2Years**: Person experienced 90 days past due delinquency or worse.
+- **AgeInYears**: Age of borrower in years.
+- **MonthlyIncm**: Monthly income.
+- **DebtRtio**: Monthly debt payments, alimony, living costs divided by monthly gross income.
+- **NoOfDependents**: Number of dependents in family excluding themselves (spouse, children etc.).
+- **NumberOfOpenCreditLinesAndLoans**: Number of open loans (installments like car loan or mortgage) and lines of credit (e.g., credit cards).
+- **NoOfTime35-65DaysPastDueNotWorse**: Number of times borrower has been 35-65 days past due but no worse in the last 2 years.
+- **NoOfTime60-89DaysPastDueNotWorse**: Number of times borrower has been 60-89 days past due but no worse in the last 2 years.
+- **NoOfTimes90DaysLate**: Number of times borrower has been 90 days or more past due.
+- **NoRealEstateLoansOrLines**: Number of mortgage and real estate loans including home equity lines of credit.
+- **UtilizationOfUnsecLines**: Total balance on credit cards and personal lines of credit (excluding real estate and installment debt like car loans) divided by the sum of credit limits.
+
+The target variable `DlqIn2Years` indicates whether the customer defaulted on a loan in the next two years (1 = Yes, 0 = No).
+
+## Methodology
+
+To uncover the factors contributing to the likelihood of default (`DlqIn2Years`), we performed an exploratory analysis followed by machine learning modeling. 
+
+The methodology for this analysis is as follows:
+
+- 1. **Data Cleaning and Preprocessing**: Explored the data, addressed missing values and repared data for analysis.
+- 2. **Exploratory Data Analysis (EDA)**: Visualized the relationships between features and the target variable.
+- 3. **Statistical Tests**: Conducted T-tests and Chi-squared tests to determine the significance of features.
+- 4. **Feature Importance Analysis**: Evaluated the impact of each feature on the probability of default.
+- 5. **Machine Learning Models**: Implemented interpretable models to predict default risk, focusing on transparency and avoiding black-box methods.
+- 6. **Addressing Class Imbalance**: Utilized upsampling techniques to handle the imbalance in the target variable.
+- 7. **Feature Engineering**: Created new features and addressed multicollinearity to improve model performance.
+- 8. **Model Evaluation and Interpretation**: Assessed model performance using various metrics and extracted interpretable insights.
+
+
+```{python}
+# Data manipulation and numerical operations
+import pandas as pd
+import numpy as np
+
+# Visualization libraries
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+# Machine learning libraries
+from sklearn.model_selection import train_test_split, GridSearchCV
+from sklearn.preprocessing import StandardScaler
+from sklearn.utils import resample
+from sklearn.linear_model import LogisticRegression, Lasso, Ridge
+from sklearn.metrics import classification_report, confusion_matrix, roc_auc_score, roc_curve, accuracy_score
+from sklearn.ensemble import RandomForestClassifier
+
+# Statistical tests and models
+from scipy.stats import ttest_ind, chi2_contingency
+import statsmodels.api as sm
+from statsmodels.stats.outliers_influence import variance_inflation_factor
+
+import warnings
+
+# Suppress FutureWarnings
+warnings.filterwarnings('ignore', category=FutureWarning)
+```
+
+## 1. Data Loading and Initial Inspection
+
+We begin by loading the dataset and performing an initial inspection to ensure it is clean and ready for analysis.
+
+```{python}
+#| echo: true
+
+# Load the dataset
+data = pd.read_csv('cs-data.csv')
+
+# Display the first few rows
+data.head()
+```
+
+```{python}
+#| echo: true
+
+# Check data types and missing values
+data.info()
+```
+
+```{python}
+#| echo: true
+
+# Summary statistics
+data.describe()
+```
+
+### Handling Missing Values
+We address missing values by filling them with appropriate measures.
+
+```{python}
+#| echo: true
+
+# Check for missing values
+data.isnull().sum()
+```
+```{python}
+#| echo: true
+
+# Fill missing values with median for numerical columns
+data['MonthlyIncm'].fillna(data['MonthlyIncm'].median(), inplace=True)
+data['NoOfDependents'].fillna(data['NoOfDependents'].median(), inplace=True)
+
+# Verify no more missing values
+data.isnull().sum()
+```
+```{python}
+#| echo: true
+
+# Separate majority and minority classes
+majority = data[data.DlqIn2Years == 0]
+minority = data[data.DlqIn2Years == 1]
+
+# Upsample minority class
+minority_upsampled = resample(minority, 
+                              replace=True,  # Sample with replacement
+                              n_samples=len(majority),  # Match number of majority samples
+                              random_state=42)
+
+# Combine majority class with upsampled minority class
+balanced_data = pd.concat([majority, minority_upsampled])
+#data = balanced_data
+```
+
+## 2. Exploratory Data Analysis (EDA)
+We perform EDA to understand the data distribution and relationships between features and the target variable.
+
+### 2.1 Analyzing the Target Variable
+
+```{python}
+#| echo: true
+#| fig-align: center
+#| fig-width: 8
+#| fig-height: 5
+
+# Plot the distribution of the target variable
+plt.figure(figsize=(8, 5))
+sns.countplot(x='DlqIn2Years', data=data, hue='DlqIn2Years')
+plt.title('Distribution of DlqIn2Years (Target Variable)')
+plt.xticks([0, 1], ['No', 'Yes'])
+plt.xlabel('DlqIn2Years (90 Days Past Due)')
+plt.ylabel('Count')
+##plt.show()
+```
+
+**Observation**: The dataset is imbalanced with significantly more non-delinquent clients.
+
+### 2.2 Univariate Analysis
+Age Distribution
+
+```{python}
+#| echo: true
+#| fig-align: center
+#| fig-width: 10
+#| fig-height: 4
+
+# Plotting Age Distribution
+plt.figure(figsize=(10, 4))
+sns.histplot(data=data, x='AgeInYears', hue='DlqIn2Years', multiple='layer', alpha=0.7, kde=True, hue_order=[1, 0], palette={0: 'blue', 1: 'orange'})
+plt.title('Distribution of AgeInYears by Delinquency Status')
+##plt.show()
+```
+
+**Observation**: Most customers are between 20 and 60 years old.
+
+Utilization of Unsecured Lines
+
+```{python}
+#| echo: true
+#| fig-align: center
+#| fig-width: 10
+#| fig-height: 6
+
+# Plot utilization distribution
+plt.figure(figsize=(10, 6))
+sns.histplot(data['UtilizationOfUnsecLines'], bins=50, kde=True)
+plt.title('Distribution of Utilization of Unsecured Lines')
+plt.xlabel('Utilization of Unsecured Lines')
+plt.ylabel('Frequency')
+#plt.show()
+```
+
+**Observation**: The distribution is heavily skewed with outliers at high utilization levels.
+
+### 2.3 Bivariate Analysis
+
+
+```{python}
+#| echo: true
+#| fig-align: center
+#| fig-width: 10
+#| fig-height: 6
+
+def bivariate_plot(column, xlabel, ylabel):
+    plt.figure(figsize=(10, 6))
+    sns.boxplot(x='DlqIn2Years', y=column, data=data, hue='DlqIn2Years', hue_order=[1, 0], palette={0: 'blue', 1: 'orange'})
+    plt.title(f'{column} vs DlqIn2Years')
+    if xlabel:
+        plt.xlabel(xlabel)
+    if ylabel:
+        plt.ylabel(ylabel)
+    #plt.show()
+```
+
+Age vs. Delinquency
+
+```{python}
+#| echo: true
+#| fig-align: center
+#| fig-width: 10
+#| fig-height: 6
+
+bivariate_plot('AgeInYears', 'Delinquency in 2 Years', 'Age in Years')
+```
+
+**Observation**: Delinquent clients tend to be younger on average.
+
+Debt Ratio vs. Delinquency
+
+```{python}
+#| echo: true
+#| fig-align: center
+#| fig-width: 10
+#| fig-height: 6
+
+# Boxplot of Debt Ratio vs. Delinquency
+plt.figure(figsize=(10, 6))
+sns.boxplot(x='DlqIn2Years', y='DebtRtio', data=data[data['DebtRtio'] < 0.5], palette='viridis')
+plt.title('Debt Ratio vs. Delinquency in 2 Years')
+plt.xlabel('Delinquency in 2 Years')
+plt.ylabel('Debt Ratio')
+#plt.show()
+```
+
+**Observation**: Delinquent clients generally have higher debt ratios.
+
+- We see that the dataset is imbalanced with more non-delinquent clients.
+- Basic summary statistics show variance across features like age, income, and utilization of credit lines.
+
+### 2.4 Correlation Matrix
+
+```{python}
+#| echo: true
+#| fig-align: center
+#| fig-width: 12
+#| fig-height: 10
+
+# Correlation matrix
+corr_matrix = data.drop('ClientId', axis=1).corr()
+
+# Plot correlation heatmap
+plt.figure(figsize=(12, 10))
+sns.heatmap(corr_matrix, annot=True, fmt=".2f", cmap='coolwarm')
+plt.title('Correlation Matrix')
+#plt.show()
+```
+
+**Observation**: 
+- Strong correlations observed between NoOfTimes90DaysLate and the target variable DlqIn2Years.
+- Weaker but notable correlations between UtilizationOfUnsecLines and DebtRtio with the target.
+
+```{python}
+#| echo: true
+#| fig-align: center
+#| fig-width: 10
+#| fig-height: 6
+
+# Remove outliers based on percentiles
+filtered_data = data[
+    (data['UtilizationOfUnsecLines'] < data['UtilizationOfUnsecLines'].quantile(0.99)) &
+    (data['DebtRtio'] < data['DebtRtio'].quantile(0.99))
+]
+
+# Plot the pairplot after removing outliers
+sns.pairplot(filtered_data, vars=["AgeInYears", "UtilizationOfUnsecLines", "DebtRtio"], hue="DlqIn2Years")
+#plt.show()
+```
+
+## 3. Statistical Analysis
+### 3.1 T-Tests for Continuous Variables
+
+```{python}
+#| echo: true
+
+# Function to perform T-test
+def perform_ttest(feature):
+    group1 = data[data['DlqIn2Years'] == 1][feature]
+    group0 = data[data['DlqIn2Years'] == 0][feature]
+    t_stat, p_value = ttest_ind(group1, group0)
+    print(f"T-test for {feature}: t-statistic = {t_stat:.2f}, p-value = {p_value:.4f}")
+
+# Continuous features
+continuous_features = ['AgeInYears', 'MonthlyIncm', 'DebtRtio', 'UtilizationOfUnsecLines']
+
+# Perform T-tests
+for feature in continuous_features:
+    perform_ttest(feature)
+```
+
+**Observation**: Significant differences in means indicate these features are important.
+
+### 3.2 Chi-Squared Tests for Categorical Variables
+
+```{python}
+#| echo: true
+
+# Function to perform Chi-squared test
+def perform_chi2_test(feature):
+    contingency_table = pd.crosstab(data[feature], data['DlqIn2Years'])
+    chi2, p_value, dof, expected = chi2_contingency(contingency_table)
+    print(f"Chi-squared test for {feature}: chi2 = {chi2:.2f}, p-value = {p_value:.4f}")
+
+#print(data.columns)
+# Categorical features
+categorical_features = ['NoOfDependents', 'NoOfOpenCreditLinesAndLoans', 'NoRealEstateLoansOrLines']
+
+# Perform Chi-squared tests
+for feature in categorical_features:
+    perform_chi2_test(feature)
+```
+
+**Observation**: Significant associations with the target variable.
+
+## 4. Feature Engineering
+### 4.1 Handling Multicollinearity Using VIF
+
+```{python}
+#| echo: true
+
+# Exclude target and identifiers
+variables = data.drop(columns=['DlqIn2Years', 'ClientId'])
+
+# Compute VIF
+vif_data = pd.DataFrame()
+vif_data["Feature"] = variables.columns
+vif_data["VIF"] = [variance_inflation_factor(variables.values, i) for i in range(len(variables.columns))]
+print("Variance Inflation Factor (VIF) for Each Feature:")
+print(vif_data)
+```
+
+**Observation**: High VIF values indicate multicollinearity among delinquency features.
+
+### 4.2 Reducing Multicollinearity
+
+```{python}
+#| echo: true
+
+# Drop features with high VIF
+data_reduced = data.drop(columns=['NoOfTime35-65DaysPastDueNotWorse', 'NoOfTime60-89DaysPastDueNotWorse'])
+```
+
+### 4.3 Creating New Features
+
+```{python}
+#| echo: true
+
+# Define features and target
+X = data_reduced.drop(columns=['DlqIn2Years', 'ClientId'])
+y = data_reduced['DlqIn2Years']
+
+# Create interaction terms
+X['DebtRtio_MonthlyIncm'] = X['DebtRtio'] * X['MonthlyIncm']
+X['AgeInYears_NoOfDependents'] = X['AgeInYears'] * X['NoOfDependents']
+
+# Apply non-linear transformations
+X['Log_UtilizationOfUnsecLines'] = np.log(X['UtilizationOfUnsecLines'] + 1e-6)
+X['Log_MonthlyIncm'] = np.log(X['MonthlyIncm'] + 1e-6)
+```
+
+## 5. Data Preparation for Modeling
+### 5.1 Feature Scaling and Splitting
+
+```{python}
+#| echo: true
+
+# Feature names
+features = X.columns
+
+# Standardize features
+scaler = StandardScaler()
+X_scaled = scaler.fit_transform(X)
+
+# Split data into training and test sets
+X_train, X_test, y_train, y_test = train_test_split(
+    X_scaled, y, test_size=0.3, random_state=42, stratify=y
+)
+```
+
+## 6. Machine Learning Models
+### 6.1 Logistic Regression with Regularization
+Lasso Regression (L1 Penalty)
+
+```{python}
+#| echo: true
+
+# Instantiate logistic regression with L1 penalty
+lasso_model = LogisticRegression(penalty='l1', solver='saga', max_iter=5000, random_state=42)
+
+# Parameter grid for C
+param_grid = {'C': np.logspace(-4, 4, 20)}
+
+# Grid search with cross-validation
+lasso_cv = GridSearchCV(lasso_model, param_grid, cv=5, scoring='roc_auc', n_jobs=-1)
+lasso_cv.fit(X_train, y_train)
+print("Best Lasso C:", lasso_cv.best_params_)
+```
+
+Ridge Regression (L2 Penalty)
+
+```{python}
+#| echo: true
+
+# Instantiate logistic regression with L2 penalty
+ridge_model = LogisticRegression(penalty='l2', solver='saga', max_iter=5000, random_state=42)
+
+# Grid search with cross-validation
+ridge_cv = GridSearchCV(ridge_model, param_grid, cv=5, scoring='roc_auc', n_jobs=-1)
+ridge_cv.fit(X_train, y_train)
+print("Best Ridge C:", ridge_cv.best_params_)
+```
+
+### 6.2 Random Forest Classifier
+
+```{python}
+#| echo: true
+
+# Random Forest Model
+rf_model = RandomForestClassifier(random_state=42)
+rf_model.fit(X_train, y_train)
+
+# Predictions
+y_pred_rf = rf_model.predict(X_test)
+```
+
+## 7. Model Evaluation
+### 7.1 Evaluate Regularized Models
+
+```{python}
+#| echo: true
+
+# Predict probabilities
+y_pred_prob_lasso = lasso_cv.best_estimator_.predict_proba(X_test)[:, 1]
+y_pred_prob_ridge = ridge_cv.best_estimator_.predict_proba(X_test)[:, 1]
+
+# Calculate AUC
+auc_lasso = roc_auc_score(y_test, y_pred_prob_lasso)
+auc_ridge = roc_auc_score(y_test, y_pred_prob_ridge)
+print("Lasso AUC:", auc_lasso)
+print("Ridge AUC:", auc_ridge)
+```
+
+### 7.2 ROC Curves
+
+```{python}
+#| echo: true
+#| fig-align: center
+#| fig-width: 10
+#| fig-height: 6
+
+# ROC Curves
+fpr_lasso, tpr_lasso, _ = roc_curve(y_test, y_pred_prob_lasso)
+fpr_ridge, tpr_ridge, _ = roc_curve(y_test, y_pred_prob_ridge)
+
+plt.figure()
+plt.plot(fpr_lasso, tpr_lasso, label='Lasso (AUC = %0.2f)' % auc_lasso)
+plt.plot(fpr_ridge, tpr_ridge, label='Ridge (AUC = %0.2f)' % auc_ridge)
+plt.plot([0, 1], [0, 1], 'k--')  # Diagonal line
+plt.xlabel('False Positive Rate')
+plt.ylabel('True Positive Rate')
+plt.title('ROC Curves for Lasso and Ridge Regression')
+plt.legend(loc='lower right')
+#plt.show()
+```
+
+### 7.3 Random Forest Evaluation
+
+```{python}
+# Evaluate Random Forest
+print(f"Random Forest Accuracy: {accuracy_score(y_test, y_pred_rf):.4f}")
+print(f"Random Forest Classification Report:\n{classification_report(y_test, y_pred_rf)}")
+```
+
+## 8. Feature Importance Analysis
+### 8.1 Coefficients from Regularized Models
+
+```{python}
+#| echo: true
+
+# Lasso Coefficients
+lasso_coef = pd.Series(lasso_cv.best_estimator_.coef_[0], index=features)
+print("Lasso Coefficients:")
+print(lasso_coef.sort_values(key=abs, ascending=False))
+
+# Ridge Coefficients
+ridge_coef = pd.Series(ridge_cv.best_estimator_.coef_[0], index=features)
+print("Ridge Coefficients:")
+print(ridge_coef.sort_values(key=abs, ascending=False))
+```
+
+### 8.2 Feature Importances from Random Forest
+
+```{python}
+#| echo: true
+#| fig-align: center
+#| fig-width: 10
+#| fig-height: 6
+
+# Random Forest Feature Importances
+importances = rf_model.feature_importances_
+feature_importance_df = pd.DataFrame({'Feature': features, 'Importance': importances})
+feature_importance_df = feature_importance_df.sort_values(by='Importance', ascending=False)
+
+# Plotting Feature Importances
+plt.figure(figsize=(10, 6))
+sns.barplot(x='Importance', y='Feature', data=feature_importance_df)
+plt.title('Feature Importance from Random Forest Model')
+plt.xlabel('Importance Score')
+plt.ylabel('Feature')
+#plt.show()
+```
+
+## 9. Model Interpretation with StatsModels
+
+```{python}
+# Create DataFrame with standardized features
+X_train_df = pd.DataFrame(X_train, columns=features)
+X_train_df.reset_index(drop=True, inplace=True)  # Reset index
+X_train_df = sm.add_constant(X_train_df)
+
+## Check for NaN values
+#print("Number of NaNs in X_train_df:")
+#print(X_train_df.isna().sum())
+#
+## Check for infinite values
+#print("\nNumber of infinite values in X_train_df:")
+#print(np.isinf(X_train_df).sum())
+
+# Reset index of y_train
+y_train = y_train.reset_index(drop=True)
+
+# Fit logistic regression model
+logit_model = sm.Logit(y_train, X_train_df)
+result = logit_model.fit()
+print(result.summary())
+```
+
+### Evaluate StatsModels Logistic Regression
+
+```{python}
+#| echo: true
+#| fig-align: center
+#| fig-width: 10
+#| fig-height: 6
+
+# Prepare test data
+X_test_df = pd.DataFrame(X_test, columns=features)
+X_test_df = sm.add_constant(X_test_df)
+
+# Predictions
+y_pred_prob = result.predict(X_test_df)
+y_pred = (y_pred_prob >= 0.5).astype(int)
+
+# Confusion Matrix
+cm = confusion_matrix(y_test, y_pred)
+print("Confusion Matrix:")
+print(cm)
+
+# Classification Report
+print("Classification Report:")
+print(classification_report(y_test, y_pred))
+
+# ROC Curve and AUC
+fpr, tpr, _ = roc_curve(y_test, y_pred_prob)
+auc_logit = roc_auc_score(y_test, y_pred_prob)
+print("Logistic Regression AUC:", auc_logit)
+
+# Plot ROC Curve
+plt.figure()
+plt.plot(fpr, tpr, label='Logistic Regression (AUC = %0.2f)' % auc_logit)
+plt.plot([0, 1], [0, 1], 'k--')
+plt.xlabel('False Positive Rate')
+plt.ylabel('True Positive Rate')
+plt.title('ROC Curve - Logistic Regression')
+plt.legend(loc='lower right')
+#plt.show()
+```
+
+The logistic regression analysis revealed that higher age and monthly income significantly reduce the likelihood of default, while factors such as previous late payments (`NoOfTimes90DaysLate`), higher utilization of unsecured lines of credit (`UtilizationOfUnsecLines`), and a greater number of dependents increase default risk. Despite these insights, the model demonstrates poor performance in predicting actual defaulters, with a recall of only 2% for the defaulter class due to class imbalance. The model's high overall accuracy of 93% is misleading, as it primarily reflects correct predictions of non-defaulters. 
+
+
+Upon implementation of data rebalancing by upscaling the minority data, the model achieves an ROC of 0.79 and accuracy of 70% both on defaulters and non-defaulters class.
+
+## 10. Key Findings
+
+### Standardized Coefficients (Beta Weights)
+
+The standardized coefficients allow us to assess the impact of each feature on the likelihood of default:
+
+* **Monthly Income (`MonthlyIncm`)**: The largest negative coefficient (-172.4781), indicating that higher income significantly reduces default risk.
+
+* **No. of Times 90+ Days Late (`NoOfTimes90DaysLate`)**: High positive coefficient (3.7909), suggesting that clients with previous late payments are more likely to default.
+
+* **No. of Times 35-65 Days Late (`NoOfTime35-65DaysPastDueNotWorse`)**: Positive coefficient (3.4066), further emphasizing the importance of past delinquency as a risk factor.
+
+* **Debt Ratio (`DebtRtio`)**: Negative coefficient (-8.2694), implying that clients with higher debt ratios have reduced default risk, which seems counterintuitive and may require further exploration.
+
+### Variance Inflation Factor (VIF)
+
+VIF is used to identify multicollinearity between features, with values greater than 10 indicating a high level of correlation:
+
+* **No. of Times 60-89 Days Late (`NoOfTime60-89DaysPastDueNotWorse`)**: VIF of 91.50, indicating very high multicollinearity, suggesting that this feature may be redundant or overly correlated with other variables.
+
+* **No. of Times 90+ Days Late (`NoOfTimes90DaysLate`)**: VIF of 72.99, again showing a high correlation with other features.
+
+* **No. of Times 35-65 Days Late (`NoOfTime35-65DaysPastDueNotWorse`):** VIF of 40.74, indicating substantial multicollinearity.
+
+These high VIF values suggest that some features may be providing overlapping information, which can lead to less reliable coefficients and predictions. Feature selection or dimensionality reduction might be needed.
+
+### Hypothesis Testing (T-Tests)
+
+The t-tests were used to compare the means of each feature between defaulters and non-defaulters. Features with significant differences (p-value < 0.05) are more likely to be associated with the likelihood of default:
+
+* **Monthly Income (`MonthlyIncm`)**: t-statistic of -6.6434 with a p-value of 0.0000, indicating a significant difference between defaulters and non-defaulters, supporting its importance in reducing default risk.
+
+* **Age (`AgeInYears`)**: t-statistic of -44.9888 with a p-value of 0.0000, showing a significant difference. Older clients are less likely to default.
+
+* **No. of Times 90+ Days Late (`NoOfTimes90DaysLate`)**: t-statistic of 45.6960 with a p-value of 0.0000, indicating that clients who have previously defaulted are significantly more likely to default again.
+
+## 11. Insights and Recommendations
+
+* **Income and Past Delinquency Are Key Factors**: The analysis highlights that clients with higher income levels are less likely to default, while clients with prior delinquencies are at a higher risk. This suggests the importance of income verification and tracking payment history.
+
+* **Feature Multicollinearity**: High VIF values for features like NoOfTime60-89DaysPastDueNotWorse suggest significant overlap with other delinquency measures. This could be addressed by reducing redundant features to simplify the model without compromising accuracy.
+
+* **Targeted Interventions**: Based on the significant impact of past delinquency, targeted interventions such as credit counseling or modified payment schedules for clients with prior late payments could help reduce future default rates.
+
+## Conclusion
+
+This analysis provides a transparent, data-driven understanding of the key factors that influence client default risk. **Monthly income** and **past delinquency history** are the most significant predictors of default. Addressing multicollinearity among features can further enhance model reliability and interpretability.
+
+By using these findings, the company can take proactive steps to mitigate default risks, such as offering financial planning services to clients at risk or requiring higher levels of income verification for loan approvals. Visual tools like bar charts and heatmaps enhance the interpretability of these results, ensuring that all stakeholders understand the driving factors behind the model's predictions.
+
+
